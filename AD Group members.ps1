@@ -51,7 +51,10 @@ Param (
     [ValidateRange(1, 7)]
     [Int]$MaxThreads = 3,
     [String]$LogFolder = "$env:POWERSHELL_LOG_FOLDER\AD Reports\Get group members\$ScriptName",
-    [String[]]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN
+    [String[]]$ScriptAdmin = @(
+        $env:POWERSHELL_SCRIPT_ADMIN,
+        $env:POWERSHELL_SCRIPT_ADMIN_BACKUP
+    )
 )
 
 Begin {    
