@@ -1,0 +1,6 @@
+{
+  "MailTo": ["bob@contoso.com"],
+  "AD": {
+    "GroupNames": ["Directors", "Employees"]
+  }
+}
