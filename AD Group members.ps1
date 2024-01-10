@@ -5,18 +5,11 @@
 
 <#
     .SYNOPSIS
-        Get the members of a group in AD and send the result in an e-mail to
-        the users defined in 'MailTo'.
+        Create a list of AD groups with their members.
 
     .DESCRIPTION
-        Get the members of a group in active directory and generate one object
-        per end node. The result is saved in an Excel file that will be mailed
-        in attachment to the end user. Two worksheets per security group are
-        generated, one storing the group structure with its members and one
-        storing the user members in a single column. The log folder will store
-        the e-mail sent to the end user, a copy of the import file and the
-        Excel file containing the results. All actions are also stored in the
-        Windows Event Log.
+        Retrieve all the members of an active directory group and create a list
+        of the members of the group and the group structure.
 
     .PARAMETER MaxThreads
         Maximum number of jobs allowed to run at the same time.
