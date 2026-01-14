@@ -127,7 +127,7 @@ process {
                             Expression = { $_.Name }
                         },
                         @{
-                            Name       = 'MemberUserUserPrincipalName'
+                            Name       = 'MemberUserPrincipalName'
                             Expression = { $_.UserPrincipalName }
                         },
                         @{
@@ -141,7 +141,7 @@ process {
                         MemberUserName = [PSCustomObject]@{
                             GroupName                     = $Group
                             'MemberUserName'              = $null
-                            'MemberUserUserPrincipalName' = $null
+                            'MemberUserPrincipalName' = $null
                             'MemberUserEmailAddress'      = $null
                         }
                     }
