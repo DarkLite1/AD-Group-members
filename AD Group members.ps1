@@ -22,7 +22,7 @@
 #>
 
 [CmdLetBinding()]
-Param (
+param (
     [Parameter(Mandatory)]
     [String]$ScriptName,
     [Parameter(Mandatory)]
@@ -35,11 +35,13 @@ Param (
     )
 )
 
-Begin {
-    Try {
+begin {
+    try {
         Get-ScriptRuntimeHC -Start
         Import-EventLogParamsHC -Source $ScriptName
         Write-EventLog @EventStartParams
+
+        $Error.Clear()
 
         #region Logging
         try {
@@ -51,7 +53,7 @@ Begin {
             }
             $logFile = New-LogFileNameHC @LogParams
         }
-        Catch {
+        catch {
             throw "Failed creating the log folder '$LogFolder': $_"
         }
         #endregion
@@ -68,7 +70,7 @@ Begin {
         }
         #endregion
     }
-    Catch {
+    catch {
         Write-Warning $_
         Write-EventLog @EventErrorParams -Message "FAILURE:`n`n- $_"
         Write-EventLog @EventEndParams
@@ -76,13 +78,13 @@ Begin {
     }
 }
 
-Process {
-    Try {
+process {
+    try {
         $jobs = $jobResults = @()
 
         $init = { Import-Module Toolbox.ActiveDirectory }
 
-        ForEach (
+        foreach (
             $group in
             (
                 $adGroupNames |
@@ -92,21 +94,52 @@ Process {
             Write-Verbose "Start job for group '$group'"
 
             $jobs += Start-Job -Name $ScriptName -InitializationScript $init -ScriptBlock {
-                Param (
+                param (
                     $Group
                 )
 
                 if (-not
                     ($MembersFlat = Get-ADGroupMemberFlatHC -Identity $Group)
                 ) {
-                    $MembersFlat = $null
+                    $MembersFlat = [PSCustomObject]@{
+                        GroupName = $Group
+                        'Member1' = $null
+                        'Member2' = $null
+                        'Member3' = $null
+                        'Member4' = $null
+                        'Member5' = $null
+                        'Member6' = $null
+                    }
                 }
 
                 if (-not
-                    ($MemberUsers = Get-ADGroupMember -Identity $Group -Recursive |
-                    Select-Object @{L = $Group; E = { $_.Name } })
+                    (
+                        $MemberUsers = Get-ADGroupMember -Identity $Group -Recursive | Where-Object {
+                            $_.objectClass -eq 'user'
+                        } |
+                        Get-ADUser -Property EmailAddress |
+                        Select-Object @{
+                            Name       = 'GroupName'
+                            Expression = { $Group }
+                        },
+                        @{
+                            Name       = 'MemberUserName'
+                            Expression = { $_.Name }
+                        },
+                        @{
+                            Name       = 'MemberUserEmailAddress'
+                            Expression = { $_.EmailAddress }
+                        }
+                    )
                 ) {
-                    $MemberUsers = $null
+                    $MemberUsers = [PSCustomObject]@{
+                        GroupName      = $Group
+                        MemberUserName = [PSCustomObject]@{
+                            GroupName                = $Group
+                            'MemberUserName'         = $null
+                            'MemberUserEmailAddress' = $null
+                        }
+                    }
                 }
 
                 [PSCustomObject]@{
@@ -121,124 +154,110 @@ Process {
 
         if ($jobs) {
             $jobResults = $jobs | Wait-Job | Receive-Job
-            Write-Verbose "Jobs done"
+            Write-Verbose 'Jobs done'
         }
     }
-    Catch {
+    catch {
         Write-Warning $_
         Write-EventLog @EventErrorParams -Message "FAILURE:`n`n- $_"
         Write-EventLog @EventEndParams
         $errorMessage = $_; $global:error.RemoveAt(0); throw $errorMessage
     }
-    Finally {
+    finally {
         Get-Job | Remove-Job -Force
     }
 }
 
-End {
-    Try {
-        $excelParams = @{
-            Path            = $logFile + ' - Result.xlsx'
-            AutoSize        = $true
-            BoldTopRow      = $true
-            FreezeTopRow    = $true
-            AutoFilter      = $true
-            ConditionalText = $(
-                New-ConditionalText ~* Black Orange
-            )
-        }
-
+end {
+    try {
         $mailParams = @{
             To        = $MailTo
             Bcc       = $ScriptAdmin
-            Subject   = 'Success'
-            Message   = 'This report checks security groups for their members.'
+            Subject   = '{0} AD Groups' -f $adGroupNames.Count
+            Message   = 'Check AD groups for their members.'
             LogFolder = $LogParams.LogFolder
             Header    = $ScriptName
-            Save      = $LogFile + ' - Mail.html'
         }
 
+        $circularGroups = @()
+
         if ($jobResults) {
-            $Sheet = 0
-            $jobResults | ForEach-Object {
-                if ($_.MembersFlat) {
-                    $M = "Group '$($_.Name)' has $($_.MembersFlat.Count) end node members"
-                    Write-Verbose $M
-                    Write-EventLog @EventVerboseParams -Message $M
+            $excelSheet = @{
+                hierarchicalGroupMembership = @()
+                usersInGroup                = @()
+            }
 
-                    #region Export to Excel
-                    Write-Verbose "Export to Excel file '$($excelParams.Path)'"
-                    $Sheet++
+            foreach ($group in $jobResults) {
+                #region Get data to export to Excel
+                $excelSheet.hierarchicalGroupMembership += $group.MembersFlat
+                $excelSheet.usersInGroup += $group.MemberUsers
+                #endregion
 
-                    # Excel worksheet names can only be 31 chars long and
-                    # must be unique
-                    $_.MembersFlat | Sort-Object -Property * |
-                    Update-FirstObjectProperties |
-                    Export-Excel @excelParams -WorksheetName ("$Sheet (Flat) " + $_.Name)
-
-                    if ($_.MemberUsers) {
-                        $_.MemberUsers | Sort-Object -Property * |
-                        Export-Excel @excelParams -WorksheetName ("$Sheet (Users) " + $_.Name)
-                    }
-                    else {
-                        $_.Name | Export-Excel @excelParams -WorksheetName ("$Sheet (Users) " + $_.Name)
-                    }
-                    #endregion
-
-                    #region Check circular group membership
-                    foreach ($group in $_.MembersFlat) {
-                        if (
-                            $group.PSObject.Members |
-                            Where-Object MemberType -EQ NoteProperty |
-                            Where-Object Value -Match '\*'
-                        ) {
-                            $circularGroup = $true
-                            break
-                        }
-                    }
-                    #endregion
-
-                    $mailParams.Attachments = $excelParams.Path
-                }
-                else {
-                    $NoGroupMembers = $true
-                }
-
-                #region format group names
-                if ($circularGroup) {
-                    $circularGroup = $false
-
-                    $M = "Group '$($_.Name)' has circular group membership"
-                    Write-Warning $M
-                    Write-EventLog @EventWarnParams -Message $M
-                    $_.Name += ' <b>(Circular group membership found)</b>'
-                }
-
-                if ($NoGroupMembers) {
-                    $NoGroupMembers = $false
-
-                    $M = "Group '$($_.Name)' has no end node members"
-                    Write-Warning $M
-                    Write-EventLog @EventWarnParams -Message $M
-                    $_.Name += ' <b>(No members found)</b>'
+                #region Check circular group membership
+                if (
+                    $group.MembersFlat.PSObject.Members |
+                    Where-Object MemberType -EQ Property |
+                    Where-Object Value -Match '\*'
+                ) {
+                    $circularGroups += $group.Name
+                    break
                 }
                 #endregion
             }
 
-            $mailParams.Message += "<p>Correctly processed group names:</p>"
-            $mailParams.Message += $jobResults.Name | ConvertTo-HtmlListHC
-            $mailParams.Message += "<p><i>Check the attachment for details.</i></p>"
+            #region Export to Excel file
+            $excelParams = @{
+                Path            = $logFile + ' - Result.xlsx'
+                AutoSize        = $true
+                BoldTopRow      = $true
+                FreezeTopRow    = $true
+                AutoFilter      = $true
+                ConditionalText = $(
+                    New-ConditionalText ~* Black Orange
+                )
+            }
+
+            Write-Verbose "Export to Excel file '$($excelParams.Path)'"
+
+            if ($excelSheet.usersInGroup) {
+                $excelSheet.usersInGroup | Sort-Object -Property * |
+                Export-Excel @excelParams -WorksheetName 'usersInGroup'
+
+                $mailParams.Attachment = $excelParams.Path
+            }
+
+            if ($excelSheet.hierarchicalGroupMembership) {
+                $excelSheet.hierarchicalGroupMembership |
+                Sort-Object -Property * |
+                Update-FirstObjectProperties |
+                Export-Excel @excelParams -WorksheetName 'hierarchicalGroupMembership'
+
+                $mailParams.Attachment = $excelParams.Path
+            }
+            #endregion
         }
-        else {
-            $mailParams.Subject = 'FAILURE'
-            $M = 'No groups processed'
-            $mailParams.Message += "<p>We couldn't process any group, please check the error message.</p>"
+
+        #region Add circular group names to email
+        if ($circularGroups) {
+            $M = "Found $($circularGroups.Count) groups with circular group memberships"
             Write-Warning $M
             Write-EventLog @EventWarnParams -Message $M
+
+            $mailParams.Message += "<p>Found $($circularGroups.Count) groups with <b>circular group memberships</b>:<ul>{0}</ul></p>" -f $(
+                $circularGroups | ForEach-Object { "<li>$_</li>" }
+            )
+        }
+        #endregion
+
+        $mailParams.Message += '<p>Group names:</p>'
+        $mailParams.Message += $jobResults.Name | ConvertTo-HtmlListHC
+
+        if ($mailParams.Attachment) {
+            $mailParams.Message += '<p><i>Check the attachment for details.</i></p>'
         }
 
         if ($Error) {
-            $mailParams.Subject = 'FAILURE'
+            $mailParams.Subject += ", $($Error.Count) errors"
             $mailParams.Priority = 'High'
             $Error | Get-Unique | ForEach-Object {
                 Write-EventLog @EventErrorParams -Message "Error detected:`n`n$_"
@@ -249,12 +268,12 @@ End {
         Get-ScriptRuntimeHC -Stop
         Send-MailHC @mailParams
     }
-    Catch {
+    catch {
         Write-Warning $_
         Write-EventLog @EventErrorParams -Message "FAILURE:`n`n- $_"
         $errorMessage = $_; $global:error.RemoveAt(0); throw $errorMessage
     }
-    Finally {
+    finally {
         Write-EventLog @EventEndParams
     }
 }
