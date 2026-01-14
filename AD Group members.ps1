@@ -139,10 +139,10 @@ process {
                     $MemberUsers = [PSCustomObject]@{
                         GroupName      = $Group
                         MemberUserName = [PSCustomObject]@{
-                            GroupName                     = $Group
-                            'MemberUserName'              = $null
+                            GroupName                 = $Group
+                            'MemberUserName'          = $null
                             'MemberUserPrincipalName' = $null
-                            'MemberUserEmailAddress'      = $null
+                            'MemberUserEmailAddress'  = $null
                         }
                     }
                 }
