@@ -117,7 +117,7 @@ process {
                         $MemberUsers = Get-ADGroupMember -Identity $Group -Recursive | Where-Object {
                             $_.objectClass -eq 'user'
                         } |
-                        Get-ADUser -Property EmailAddress |
+                        Get-ADUser -Property EmailAddress, UserPrincipalName |
                         Select-Object @{
                             Name       = 'GroupName'
                             Expression = { $Group }
@@ -125,6 +125,10 @@ process {
                         @{
                             Name       = 'MemberUserName'
                             Expression = { $_.Name }
+                        },
+                        @{
+                            Name       = 'MemberUserUserPrincipalName'
+                            Expression = { $_.UserPrincipalName }
                         },
                         @{
                             Name       = 'MemberUserEmailAddress'
@@ -135,9 +139,10 @@ process {
                     $MemberUsers = [PSCustomObject]@{
                         GroupName      = $Group
                         MemberUserName = [PSCustomObject]@{
-                            GroupName                = $Group
-                            'MemberUserName'         = $null
-                            'MemberUserEmailAddress' = $null
+                            GroupName                     = $Group
+                            'MemberUserName'              = $null
+                            'MemberUserUserPrincipalName' = $null
+                            'MemberUserEmailAddress'      = $null
                         }
                     }
                 }
